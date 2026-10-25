@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Puppet warp</title>
+<style>
+:root{
+  --ink:#1E2A44; --paper:#E6EBF2; --grid:rgba(30,42,68,.08);
+  --pin:#F2528D; --mesh:#2BB3A3; --chalk:#F4F6FA; --muted:rgba(244,246,250,.62);
+}
+@media (prefers-color-scheme: dark){
+  :root{ --ink:#2B3A5E; --paper:#131A2A; --grid:rgba(244,246,250,.07); }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);
+  font-family:"Avenir Next","Segoe UI",system-ui,sans-serif;color:var(--chalk);
+  touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#backdrop{position:fixed;inset:0;z-index:1;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+#demo{position:fixed;inset:0;z-index:1;display:none;background:#fff;color:#1d2433;padding:56px 18px 18px}
+#demo.on{display:block}
+#demo .bar{position:absolute;left:0;right:0;top:0;height:48px;background:#f2f3f7;border-bottom:1px solid #dcdfe8;
+  display:flex;align-items:center;justify-content:center;font-weight:600}
+#demo .msg{max-width:72%;padding:10px 14px;border-radius:18px;margin:10px 0;font-size:15px;line-height:1.35}
+#demo .them{background:#eceef4}
+#demo .me{background:#3478f6;color:#fff;margin-left:auto}
+#demo button{position:absolute;right:18px;bottom:18px;border:0;border-radius:20px;background:#3478f6;color:#fff;
+  padding:12px 26px;font:600 15px inherit;font-family:inherit}
+#stage{position:fixed;inset:0;z-index:2;cursor:crosshair;touch-action:none}
+#panel{position:fixed;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:5;width:252px;
+  background:var(--ink);border-radius:18px;box-shadow:0 10px 30px rgba(10,16,30,.35);overflow:hidden}
+#grip{display:flex;align-items:center;gap:8px;height:42px;padding:0 8px 0 14px;cursor:grab;touch-action:none}
+#grip .dots{width:10px;height:16px;flex:none;
+  background:radial-gradient(circle,var(--muted) 1.4px,transparent 1.6px) 0 0/5px 5.3px}
+#grip .title{flex:1;font-weight:600;font-size:14px;letter-spacing:.2px}
+#grip .pinicon{display:none}
+.iconbtn{width:30px;height:30px;border:0;border-radius:9px;background:rgba(255,255,255,.08);color:var(--chalk);
+  font-size:18px;line-height:1;cursor:pointer}
+#body{padding:2px 12px 12px}
+.meta{display:flex;flex-direction:column;gap:2px;margin:0 2px 10px;font-size:12px;color:var(--muted);min-height:32px}
+.meta b{font-size:13px;color:var(--chalk);font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;border:0;border-radius:11px;
+  background:rgba(255,255,255,.09);color:var(--chalk);padding:10px 8px;min-height:40px;font:500 13px inherit;
+  font-family:inherit;cursor:pointer}
+.btn[aria-pressed="true"]{background:var(--mesh);color:#0c2a26}
+.btn.wide{grid-column:1/-1}
+.btn:active{transform:scale(.98)}
+.btn:focus-visible,.iconbtn:focus-visible,input[type=range]:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.slider{display:flex;flex-direction:column;gap:6px;margin:12px 2px 0;font-size:12px;color:var(--muted)}
+.slider input{width:100%;accent-color:var(--pin)}
+#panel.mini{width:56px;height:56px;border-radius:50%}
+#panel.mini #body,#panel.mini .title,#panel.mini .dots,#panel.mini #collapse{display:none}
+#panel.mini #grip{height:56px;padding:0;justify-content:center}
+#panel.mini .pinicon{display:block}
+#toast{position:fixed;left:50%;top:max(16px,env(safe-area-inset-top));transform:translateX(-50%);z-index:9;
+  background:var(--ink);color:var(--chalk);padding:9px 16px;border-radius:14px;font-size:13px;opacity:0;
+  pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){ #toast{transition:none} .btn:active{transform:none} }
+</style>
+</head>
+<body>
+<div id="backdrop"></div>
+<div id="demo">
+  <div class="bar">Messages</div>
+  <div class="msg them">Are you still at the studio?</div>
+  <div class="msg me">Yes, rigging the new character.</div>
+  <div class="msg them">Send me the warp when it's ready.</div>
+  <button id="send">Send</button>
+</div>
+<canvas id="stage"></canvas>
+
+<div id="panel">
+  <div id="grip">
+    <span class="dots"></span>
+    <span class="title">Puppet warp</span>
+    <svg class="pinicon" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-label="Open puppet warp">
+      <circle cx="12" cy="9" r="5.5" fill="#F2528D" stroke="#F4F6FA" stroke-width="2"/>
+      <path d="M12 14.5V21" stroke="#F4F6FA" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+    <button class="iconbtn" id="collapse" aria-label="Shrink to bubble">&minus;</button>
+  </div>
+  <div id="body">
+    <div class="meta"><b id="count">0 pins</b><span id="hint">Tap to drop a pin. Drag to warp. Double-tap a pin to remove it.</span></div>
+    <div class="grid">
+      <button class="btn" id="rm">Remove pin</button>
+      <button class="btn" id="clear">Clear pins</button>
+      <button class="btn" id="mesh" aria-pressed="false">Show mesh</button>
+      <button class="btn" id="thru" aria-pressed="false">Pass through</button>
+      <button class="btn wide" id="demoBtn" aria-pressed="false">Demo app behind</button>
+      <label class="btn" for="file">Open image</label>
+      <button class="btn" id="save">Save PNG</button>
+    </div>
+    <label class="slider">Layer opacity
+      <input type="range" id="op" min="20" max="100" value="100">
+    </label>
+    <input type="file" id="file" accept="image/*" hidden>
+  </div>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const stage = $('#stage'), ctx = stage.getContext('2d');
+  const layer = document.createElement('canvas'), lctx = layer.getContext('2d');
+
+  let W = 0, H = 0, dpr = 1;
+  let img = null, ix = 0, iy = 0, iw = 0, ih = 0;
+  const cols = 18; let rows = 24;
+  let rest = new Float32Array(0), cur = new Float32Array(0);
+  let pins = [], sel = -1, drag = -1, lastTap = { t: 0, i: -1 };
+  let showMesh = false, opacity = 1, raf = 0;
+
+  /* ---------- sample artwork ---------- */
+  function makeSample() {
+    const c = document.createElement('canvas'); c.width = 480; c.height = 640;
+    const g = c.getContext('2d'); g.lineCap = 'round'; g.lineJoin = 'round';
+    const limb = (pts, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath();
+      g.moveTo(...pts[0]); pts.slice(1).forEach(p => g.lineTo(...p)); g.stroke(); };
+    const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r);
+      g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+    limb([[200, 420], [192, 520], [182, 600]], 46, '#2B3A67');
+    limb([[280, 420], [290, 520], [308, 600]], 46, '#2B3A67');
+    g.fillStyle = '#1b2547';
+    g.beginPath(); g.ellipse(168, 612, 40, 20, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(326, 612, 40, 20, 0, 0, 7); g.fill();
+    limb([[170, 255], [100, 315], [62, 400]], 38, '#F7C948');
+    limb([[310, 255], [388, 205], [428, 112]], 38, '#F7C948');
+    g.fillStyle = '#FFD6A5';
+    g.beginPath(); g.arc(60, 410, 26, 0, 7); g.fill();
+    g.beginPath(); g.arc(430, 100, 26, 0, 7); g.fill();
+    g.fillStyle = '#3FA7D6'; rr(158, 220, 164, 234, 54); g.fill();
+    limb([[186, 232], [240, 262], [296, 232]], 22, '#FF7B54');
+    g.fillStyle = '#FFD6A5'; g.beginPath(); g.arc(240, 140, 74, 0, 7); g.fill();
+    g.fillStyle = '#7B4B2A'; g.beginPath(); g.arc(240, 108, 76, Math.PI, 0); g.fill();
+    g.fillStyle = '#1b2547';
+    g.beginPath(); g.arc(214, 146, 7, 0, 7); g.fill();
+    g.beginPath(); g.arc(266, 146, 7, 0, 7); g.fill();
+    g.strokeStyle = '#1b2547'; g.lineWidth = 6;
+    g.beginPath(); g.arc(240, 166, 22, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+    return c;
+  }
+
+  /* ---------- mesh ---------- */
+  function fit() {
+    if (!img) return;
+    const s = Math.min(W * 0.82 / img.width, H * 0.58 / img.height);
+    iw = img.width * s; ih = img.height * s;
+    ix = (W - iw) / 2; iy = (H - ih) / 2 - H * 0.05;
+    rows = Math.max(4, Math.round(cols * ih / iw));
+    rest = new Float32Array((cols + 1) * (rows + 1) * 2);
+    for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) {
+      const k = (j * (cols + 1) + i) * 2;
+      rest[k] = ix + iw * i / cols; rest[k + 1] = iy + ih * j / rows;
+    }
+    cur = new Float32Array(rest);
+    pins = []; sel = -1; drag = -1; updateCount();
+  }
+  function eachTri(fn) {
+    const s = cols + 1;
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const a = (j * s + i) * 2, b = a + 2, c = ((j + 1) * s + i) * 2, d = c + 2;
+      fn(a, b, c); fn(b, d, c);
+    }
+  }
+
+  /* ---------- similarity moving-least-squares warp ---------- */
+  function warp(x, y) {
+    const n = pins.length;
+    if (!n) return [x, y];
+    let sw = 0, px = 0, py = 0, qx = 0, qy = 0;
+    const ws = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = pins[i], dx = x - p.px, dy = y - p.py, d2 = dx * dx + dy * dy;
+      if (d2 < 1e-6) return [p.qx, p.qy];
+      const w = 1 / d2; ws[i] = w; sw += w;
+      px += w * p.px; py += w * p.py; qx += w * p.qx; qy += w * p.qy;
+    }
+    px /= sw; py /= sw; qx /= sw; qy /= sw;
+    let nr = 0, ni = 0, den = 0;
+    for (let i = 0; i < n; i++) {
+      const p = pins[i], w = ws[i];
+      const ax = p.px - px, ay = p.py - py, bx = p.qx - qx, by = p.qy - qy;
+      nr += w * (ax * bx + ay * by); ni += w * (ax * by - ay * bx); den += w * (ax * ax + ay * ay);
+    }
+    const sr = den < 1e-9 ? 1 : nr / den, si = den < 1e-9 ? 0 : ni / den;
+    const vx = x - px, vy = y - py;
+    return [qx + vx * sr - vy * si, qy + vx * si + vy * sr];
+  }
+  function deform() {
+    for (let k = 0; k < rest.length; k += 2) {
+      const r = warp(rest[k], rest[k + 1]); cur[k] = r[0]; cur[k + 1] = r[1];
+    }
+  }
+  // where on the original artwork does this screen point currently sit?
+  function restFor(x, y) {
+    if (!pins.length) return [x, y];
+    let out = null;
+    eachTri((a, b, c) => {
+      if (out) return;
+      const x0 = cur[a], y0 = cur[a + 1], x1 = cur[b], y1 = cur[b + 1], x2 = cur[c], y2 = cur[c + 1];
+      const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+      if (Math.abs(d) < 1e-9) return;
+      const l0 = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / d;
+      const l1 = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / d;
+      const l2 = 1 - l0 - l1;
+      if (l0 >= -1e-4 && l1 >= -1e-4 && l2 >= -1e-4)
+        out = [l0 * rest[a] + l1 * rest[b] + l2 * rest[c], l0 * rest[a + 1] + l1 * rest[b + 1] + l2 * rest[c + 1]];
+    });
+    return out || [x, y];
+  }
+
+  /* ---------- rendering ---------- */
+  function drawTri(a, b, c) {
+    const sx = img.width / iw, sy = img.height / ih;
+    const u0 = (rest[a] - ix) * sx, v0 = (rest[a + 1] - iy) * sy;
+    const u1 = (rest[b] - ix) * sx, v1 = (rest[b + 1] - iy) * sy;
+    const u2 = (rest[c] - ix) * sx, v2 = (rest[c + 1] - iy) * sy;
+    const x0 = cur[a], y0 = cur[a + 1], x1 = cur[b], y1 = cur[b + 1], x2 = cur[c], y2 = cur[c + 1];
+    const det = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
+    if (Math.abs(det) < 1e-9) return;
+    const A = (x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / det;
+    const B = (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / det;
+    const C = (x0 * (u2 - u1) + x1 * (u0 - u2) + x2 * (u1 - u0)) / det;
+    const D = (y0 * (u2 - u1) + y1 * (u0 - u2) + y2 * (u1 - u0)) / det;
+    const E = (x0 * (u1 * v2 - u2 * v1) + x1 * (u2 * v0 - u0 * v2) + x2 * (u0 * v1 - u1 * v0)) / det;
+    const F = (y0 * (u1 * v2 - u2 * v1) + y1 * (u2 * v0 - u0 * v2) + y2 * (u0 * v1 - u1 * v0)) / det;
+    const cx = (x0 + x1 + x2) / 3, cy = (y0 + y1 + y2) / 3;
+    const ex = (x, y) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1; return [x + dx / l * .7, y + dy / l * .7]; };
+    const p0 = ex(x0, y0), p1 = ex(x1, y1), p2 = ex(x2, y2);
+    lctx.save();
+    lctx.beginPath(); lctx.moveTo(p0[0], p0[1]); lctx.lineTo(p1[0], p1[1]); lctx.lineTo(p2[0], p2[1]); lctx.closePath();
+    lctx.clip();
+    lctx.transform(A, B, C, D, E, F);
+    lctx.drawImage(img, 0, 0);
+    lctx.restore();
+  }
+  function render() {
+    raf = 0;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, layer.width, layer.height);
+    lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (img) eachTri(drawTri);
+    ctx.globalAlpha = opacity; ctx.drawImage(layer, 0, 0, W, H); ctx.globalAlpha = 1;
+    if (showMesh) {
+      ctx.strokeStyle = 'rgba(43,179,163,.8)'; ctx.lineWidth = 1; ctx.beginPath();
+      eachTri((a, b, c) => { ctx.moveTo(cur[a], cur[a + 1]); ctx.lineTo(cur[b], cur[b + 1]);
+        ctx.lineTo(cur[c], cur[c + 1]); ctx.closePath(); });
+      ctx.stroke();
+    }
+    pins.forEach((p, i) => {
+      const on = i === sel;
+      ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.qx, p.qy, on ? 15 : 13, 0, 7); ctx.fill();
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      ctx.fillStyle = '#F2528D'; ctx.beginPath(); ctx.arc(p.qx, p.qy, on ? 10 : 8, 0, 7); ctx.fill();
+    });
+  }
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(render); };
+
+  /* ---------- stage input ---------- */
+  const pt = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  function removePin(i) { pins.splice(i, 1); sel = -1; drag = -1; deform(); updateCount(); schedule(); }
+  stage.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const [x, y] = pt(e); let hit = -1, best = 28 * 28;
+    pins.forEach((p, i) => { const d = (p.qx - x) ** 2 + (p.qy - y) ** 2; if (d < best) { best = d; hit = i; } });
+    const now = performance.now();
+    if (hit >= 0) {
+      if (lastTap.i === hit && now - lastTap.t < 320) { removePin(hit); lastTap = { t: 0, i: -1 }; return; }
+      lastTap = { t: now, i: hit }; sel = hit; drag = hit;
+    } else {
+      const [rx, ry] = restFor(x, y);
+      pins.push({ px: rx, py: ry, qx: x, qy: y });
+      sel = pins.length - 1; drag = sel; lastTap = { t: now, i: sel }; updateCount();
+    }
+    stage.setPointerCapture(e.pointerId); schedule();
+  });
+  stage.addEventListener('pointermove', e => {
+    if (drag < 0) return;
+    const [x, y] = pt(e); pins[drag].qx = x; pins[drag].qy = y; deform(); schedule();
+  });
+  const endDrag = () => { drag = -1; };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+
+  /* ---------- panel ---------- */
+  const panel = $('#panel'), grip = $('#grip');
+  let pd = null;
+  grip.addEventListener('pointerdown', e => {
+    if (e.target.closest('#collapse')) return;
+    const r = panel.getBoundingClientRect();
+    panel.style.left = r.left + 'px'; panel.style.top = r.top + 'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    pd = { dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, moved: false };
+    grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener('pointermove', e => {
+    if (!pd) return;
+    if (Math.hypot(e.clientX - pd.sx, e.clientY - pd.sy) > 5) pd.moved = true;
+    const r = panel.getBoundingClientRect();
+    panel.style.left = Math.min(Math.max(0, e.clientX - pd.dx), innerWidth - r.width) + 'px';
+    panel.style.top = Math.min(Math.max(0, e.clientY - pd.dy), innerHeight - r.height) + 'px';
+  });
+  grip.addEventListener('pointerup', () => {
+    if (pd && !pd.moved && panel.classList.contains('mini')) { panel.classList.remove('mini'); clampPanel(); }
+    pd = null;
+  });
+  function clampPanel() {
+    requestAnimationFrame(() => {
+      const r = panel.getBoundingClientRect();
+      if (panel.style.left) {
+        panel.style.left = Math.min(Math.max(0, r.left), innerWidth - r.width) + 'px';
+        panel.style.top = Math.min(Math.max(0, r.top), innerHeight - r.height) + 'px';
+      }
+    });
+  }
+  $('#collapse').addEventListener('click', () => { panel.classList.add('mini'); });
+
+  function updateCount() {
+    $('#count').textContent = pins.length === 1 ? '1 pin' : pins.length + ' pins';
+    $('#hint').style.display = pins.length ? 'none' : '';
+  }
+  let toastT = 0;
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800);
+  }
+  const toggle = (id, fn) => { const b = $(id);
+    b.addEventListener('click', () => { const on = b.getAttribute('aria-pressed') !== 'true';
+      b.setAttribute('aria-pressed', on); fn(on); }); };
+
+  $('#rm').addEventListener('click', () => { if (sel >= 0) removePin(sel); else toast('Tap a pin first'); });
+  $('#clear').addEventListener('click', () => { pins = []; sel = -1; deform(); updateCount(); schedule(); });
+  toggle('#mesh', on => { showMesh = on; schedule(); });
+  toggle('#thru', on => { stage.style.pointerEvents = on ? 'none' : 'auto';
+    toast(on ? 'Taps now reach the app beneath' : 'Pins are editable again'); });
+  toggle('#demoBtn', on => { $('#demo').classList.toggle('on', on); });
+  $('#send').addEventListener('click', () => toast('Tapped the app underneath'));
+  $('#op').addEventListener('input', e => { opacity = e.target.value / 100; schedule(); });
+
+  $('#file').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    const url = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {
+      const m = Math.min(1, 1024 / Math.max(im.width, im.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.width * m); c.height = Math.round(im.height * m);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      img = c; URL.revokeObjectURL(url); fit(); schedule();
+    };
+    im.onerror = () => toast('That file could not be opened as an image');
+    im.src = url; e.target.value = '';
+  });
+
+  $('#save').addEventListener('click', () => {
+    if (!img) return;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (let k = 0; k < cur.length; k += 2) {
+      x0 = Math.min(x0, cur[k]); x1 = Math.max(x1, cur[k]);
+      y0 = Math.min(y0, cur[k + 1]); y1 = Math.max(y1, cur[k + 1]);
+    }
+    x0 = Math.max(0, x0 - 4); y0 = Math.max(0, y0 - 4); x1 = Math.min(W, x1 + 4); y1 = Math.min(H, y1 + 4);
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round((x1 - x0) * dpr)); out.height = Math.max(1, Math.round((y1 - y0) * dpr));
+    out.getContext('2d').drawImage(layer, x0 * dpr, y0 * dpr, out.width, out.height, 0, 0, out.width, out.height);
+    out.toBlob(b => {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'puppet-warp.png';
+      document.body.appendChild(a); a.click(); a.remove(); toast('Saved warped layer');
+    });
+  });
+
+  /* ---------- boot ---------- */
+  function resize() {
+    const nw = innerWidth, nh = innerHeight;
+    const big = Math.abs(nw - W) > 80 || Math.abs(nh - H) > 80;
+    W = nw; H = nh; dpr = Math.min(devicePixelRatio || 1, 2);
+    [stage, layer].forEach(c => { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); });
+    stage.style.width = W + 'px'; stage.style.height = H + 'px';
+    if (big || !rest.length) fit();
+    clampPanel(); schedule();
+  }
+  img = makeSample();
+  addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>
